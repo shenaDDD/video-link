@@ -33,10 +33,10 @@
 
     <div class="player">
       <video id="v" controls preload="metadata" playsinline webkit-playsinline>
-        <!-- 优先使用“URL 编码后的中文文件名” -->
-        <source id="src1" src="https://cdn.jsdelivr.net/gh/shenaDDD/video-link@main/assets/%E6%96%87%E7%AB%A0%E8%AE%B2%E8%A7%A3_2.mp4" type="video/mp4">
-        <!-- 回退：原始中文文件名（部分环境可用） -->
-        <source id="src2" src="https://cdn.jsdelivr.net/gh/shenaDDD/video-link@main/assets/文章讲解_2.mp4" type="video/mp4">
+        <!-- 优先使用 URL 编码后的文件名 -->
+        <source id="src1" src="https://cdn.jsdelivr.net/gh/shenaDDD/video-link@main/%E6%96%87%E7%AB%A0%E8%AE%B2%E8%A7%A3_2.mp4" type="video/mp4">
+        <!-- 回退：未编码的原始路径 -->
+        <source id="src2" src="https://cdn.jsdelivr.net/gh/shenaDDD/video-link@main/文章讲解_2.mp4" type="video/mp4">
         您的浏览器不支持 HTML5 视频播放。
       </video>
     </div>
@@ -48,107 +48,80 @@
     </div>
 
     <p class="hint">
-      若播放失败，通常是视频编码为 H.265/HEVC 导致浏览器不支持。可将视频转为 H.264（AVC）+ AAC 后重新上传；
-      或把文件名改为英文以避免路径编码问题。
+      若播放失败，通常是视频编码为 H.265/HEVC 导致浏览器不支持。
+      可将视频转为 H.264（AVC）+ AAC 后重新上传，或把文件名改为英文。
     </p>
   </div>
 
   <script>
-    // ============== 计数命名空间（可改成你喜欢的字符串） ==============
+    // ====== countapi 命名空间 ======
     const COUNTAPI_NS = "shenaDDD-video-link-2025";
     const COUNT_BASE  = "https://api.countapi.xyz";
     const PV_KEY = "pageviews";
     const PLAY_KEY = "plays";
 
-    // ============== DOM ==============
+    // ====== DOM ======
     const v = document.getElementById('v');
+    const statusEl = document.getElementById('status');
     const pvSpan = document.getElementById('pv');
     const playSpan = document.getElementById('play');
-    const statusEl = document.getElementById('status');
 
-    // ============== 状态&错误处理 ==============
+    // ====== 播放状态 ======
     v.addEventListener('loadedmetadata', () => {
       statusEl.textContent = `就绪，可以播放 ✅（时长 ${Math.round(v.duration)} 秒）`;
     });
 
     v.addEventListener('error', () => {
-      // 若当前在第一个源失败，尝试切到第二个
       const s1 = document.getElementById('src1');
       const s2 = document.getElementById('src2');
       if (v.currentSrc === s1.src && s2) {
-        statusEl.textContent = "主源失败，正在切换备用源…";
+        statusEl.textContent = "主源加载失败，正在尝试备用源…";
         v.src = s2.src;
         v.load();
         v.play().catch(() => {
-          statusEl.innerHTML = '<span class="fail">播放失败。请刷新再试，或将视频转码为 H.264 + AAC 并使用英文文件名。</span>';
+          statusEl.innerHTML = '<span class="fail">播放失败：请检查文件编码或路径。</span>';
         });
       } else {
-        statusEl.innerHTML = '<span class="fail">播放失败。请将视频转码为 H.264（AVC）+ AAC，或检查文件路径。</span>';
+        statusEl.innerHTML = '<span class="fail">播放失败：视频可能为 H.265/HEVC 编码，建议转码为 H.264。</span>';
       }
     });
 
-    // ============== 计数（免费、零后端） ==============
-    function todayKey() {
-      const d = new Date();
-      return `pv-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
-    }
-
+    // ====== countapi 免费统计 ======
     async function countapi(path){
       try{
-        const r = await fetch(path, { cache: 'no-store' });
+        const r = await fetch(path,{cache:'no-store'});
         if(!r.ok) throw new Error(r.status);
         return await r.json();
-      }catch(e){ return null; }
-    }
-
-    async function hit(key){
-      const url = `${COUNT_BASE}/hit/${encodeURIComponent(COUNTAPI_NS)}/${encodeURIComponent(key)}`;
-      return countapi(url);
-    }
-    async function get(key){
-      const url = `${COUNT_BASE}/get/${encodeURIComponent(COUNTAPI_NS)}/${encodeURIComponent(key)}`;
-      return countapi(url);
+      }catch(e){return null;}
     }
     async function createIfMissing(key){
-      // 预创建（幂等），避免首次访问无值
       await countapi(`${COUNT_BASE}/create?namespace=${encodeURIComponent(COUNTAPI_NS)}&key=${encodeURIComponent(key)}&value=0`);
     }
-
+    async function get(key){
+      return countapi(`${COUNT_BASE}/get/${encodeURIComponent(COUNTAPI_NS)}/${encodeURIComponent(key)}`);
+    }
+    async function hit(key){
+      return countapi(`${COUNT_BASE}/hit/${encodeURIComponent(COUNTAPI_NS)}/${encodeURIComponent(key)}`);
+    }
     (async function initCounters(){
-      // 预创建两个计数器键
       await createIfMissing(PV_KEY);
       await createIfMissing(PLAY_KEY);
-
-      // 页面访问：按“每天一次/每设备”去重
-      const dayK = todayKey();
+      const dayK = `pv-${new Date().toISOString().slice(0,10)}`;
       if (!localStorage.getItem(dayK)) {
         const res = await hit(PV_KEY);
-        if (res && typeof res.value === 'number') {
-          pvSpan.textContent = res.value;
-          localStorage.setItem(dayK, '1');
-        }
+        if (res && typeof res.value==='number') pvSpan.textContent=res.value;
+        localStorage.setItem(dayK,'1');
       }
-      // 刷新展示
-      const g1 = await get(PV_KEY);
-      if (g1 && typeof g1.value === 'number') pvSpan.textContent = g1.value;
-
-      // 播放次数：同一标签页只记一次
-      let playedOnce = false;
-      v.addEventListener('play', async () => {
-        if (playedOnce) return;
-        playedOnce = true;
-        const res = await hit(PLAY_KEY);
-        if (res && typeof res.value === 'number') {
-          playSpan.textContent = res.value;
-        } else {
-          const g = await get(PLAY_KEY);
-          if (g && typeof g.value === 'number') playSpan.textContent = g.value;
-        }
-      }, { once: true });
-
-      // 初始显示当前累计播放
-      const g2 = await get(PLAY_KEY);
-      if (g2 && typeof g2.value === 'number') playSpan.textContent = g2.value;
+      const g1=await get(PV_KEY);if(g1&&typeof g1.value==='number')pvSpan.textContent=g1.value;
+      let playedOnce=false;
+      v.addEventListener('play',async()=>{
+        if(playedOnce)return;
+        playedOnce=true;
+        const res=await hit(PLAY_KEY);
+        if(res&&typeof res.value==='number')playSpan.textContent=res.value;
+        else{const g=await get(PLAY_KEY);if(g&&typeof g.value==='number')playSpan.textContent=g.value;}
+      },{once:true});
+      const g2=await get(PLAY_KEY);if(g2&&typeof g2.value==='number')playSpan.textContent=g2.value;
     })();
   </script>
 </body>
