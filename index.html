@@ -8,7 +8,7 @@
     :root { color-scheme: light dark; }
     body{
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Microsoft Yahei", sans-serif;
-      margin: 0; padding: 24px; line-height: 1.6;
+      margin: 0; padding: 24px; line-height: 1.6; background: #fafafa;
     }
     .wrap{ max-width: 820px; margin: 0 auto; }
     h1{ font-size: 20px; margin: 0 0 12px; }
@@ -16,25 +16,27 @@
       position: relative; background: #000; border-radius: 14px; overflow: hidden;
       box-shadow: 0 8px 28px rgba(0,0,0,.12);
     }
-    video{ width: 100%; height: auto; display: block; }
+    video{ width: 100%; height: auto; display: block; background:#000; }
     .meta{
       display: grid; grid-template-columns: 1fr auto; gap: 8px 16px;
       align-items: center; margin-top: 12px; font-size: 14px;
     }
     .badge{ font-variant-numeric: tabular-nums; opacity: .85; }
-    .small{ font-size: 12px; opacity: .7; }
+    .small{ font-size: 12px; opacity: .75; }
     .hint{ margin-top: 12px; font-size: 13px; opacity: .75; }
-    a{ color: inherit; }
     .fail{ color: #c00; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>文章讲解视频（免登录播放）</h1>
+
     <div class="player">
       <video id="v" controls preload="metadata" playsinline webkit-playsinline>
-        <!-- 视频源已设置为你的 jsDelivr 链接 -->
-        <source id="src" src="https://cdn.jsdelivr.net/gh/<你的GitHub用户名>/video-link@main/assets/文章讲解_2.mp4" type="video/mp4">
+        <!-- 优先使用“URL 编码后的中文文件名” -->
+        <source id="src1" src="https://cdn.jsdelivr.net/gh/shenaDDD/video-link@main/assets/%E6%96%87%E7%AB%A0%E8%AE%B2%E8%A7%A3_2.mp4" type="video/mp4">
+        <!-- 回退：原始中文文件名（部分环境可用） -->
+        <source id="src2" src="https://cdn.jsdelivr.net/gh/shenaDDD/video-link@main/assets/文章讲解_2.mp4" type="video/mp4">
         您的浏览器不支持 HTML5 视频播放。
       </video>
     </div>
@@ -42,102 +44,112 @@
     <div class="meta">
       <div class="badge">👁️ 页面访问：<span id="pv">—</span></div>
       <div class="badge">▶️ 播放次数：<span id="play">—</span></div>
-      <div class="small" id="status">正在初始化…</div>
+      <div class="small" id="status">正在加载视频元数据…</div>
     </div>
 
     <p class="hint">
-      若播放卡顿，请稍等片刻让 CDN 缓存预热，或刷新页面重试。
+      若播放失败，通常是视频编码为 H.265/HEVC 导致浏览器不支持。可将视频转为 H.264（AVC）+ AAC 后重新上传；
+      或把文件名改为英文以避免路径编码问题。
     </p>
   </div>
 
   <script>
-    // === 你只需改这里：填写你的 GitHub 用户名 ===
-    const VIDEO_SRC   = "https://cdn.jsdelivr.net/gh/<你的GitHub用户名>/video-link@main/assets/文章讲解_2.mp4";
-    const COUNTAPI_NS = "video-link-viewcount-2025"; // 访问计数命名空间，可随意改名
+    // ============== 计数命名空间（可改成你喜欢的字符串） ==============
+    const COUNTAPI_NS = "shenaDDD-video-link-2025";
+    const COUNT_BASE  = "https://api.countapi.xyz";
+    const PV_KEY = "pageviews";
+    const PLAY_KEY = "plays";
 
-    // ——— 页面逻辑 ———
+    // ============== DOM ==============
     const v = document.getElementById('v');
     const pvSpan = document.getElementById('pv');
     const playSpan = document.getElementById('play');
     const statusEl = document.getElementById('status');
-    document.getElementById('src').src = VIDEO_SRC;
 
-    const COUNT_BASE = "https://api.countapi.xyz";
-    const PV_KEY   = "pageviews";
-    const PLAY_KEY = "plays";
+    // ============== 状态&错误处理 ==============
+    v.addEventListener('loadedmetadata', () => {
+      statusEl.textContent = `就绪，可以播放 ✅（时长 ${Math.round(v.duration)} 秒）`;
+    });
 
+    v.addEventListener('error', () => {
+      // 若当前在第一个源失败，尝试切到第二个
+      const s1 = document.getElementById('src1');
+      const s2 = document.getElementById('src2');
+      if (v.currentSrc === s1.src && s2) {
+        statusEl.textContent = "主源失败，正在切换备用源…";
+        v.src = s2.src;
+        v.load();
+        v.play().catch(() => {
+          statusEl.innerHTML = '<span class="fail">播放失败。请刷新再试，或将视频转码为 H.264 + AAC 并使用英文文件名。</span>';
+        });
+      } else {
+        statusEl.innerHTML = '<span class="fail">播放失败。请将视频转码为 H.264（AVC）+ AAC，或检查文件路径。</span>';
+      }
+    });
+
+    // ============== 计数（免费、零后端） ==============
     function todayKey() {
       const d = new Date();
       return `pv-${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
     }
 
-    async function countapiHit(key) {
-      try {
-        const url = `${COUNT_BASE}/hit/${encodeURIComponent(COUNTAPI_NS)}/${encodeURIComponent(key)}`;
-        const r = await fetch(url);
+    async function countapi(path){
+      try{
+        const r = await fetch(path, { cache: 'no-store' });
         if(!r.ok) throw new Error(r.status);
         return await r.json();
-      } catch(e) {
-        console.warn("countapi hit failed:", e);
-        return null;
-      }
+      }catch(e){ return null; }
     }
 
-    async function countapiGet(key) {
-      try {
-        const url = `${COUNT_BASE}/get/${encodeURIComponent(COUNTAPI_NS)}/${encodeURIComponent(key)}`;
-        const r = await fetch(url);
-        if(!r.ok) throw new Error(r.status);
-        return await r.json();
-      } catch(e) {
-        console.warn("countapi get failed:", e);
-        return null;
-      }
+    async function hit(key){
+      const url = `${COUNT_BASE}/hit/${encodeURIComponent(COUNTAPI_NS)}/${encodeURIComponent(key)}`;
+      return countapi(url);
+    }
+    async function get(key){
+      const url = `${COUNT_BASE}/get/${encodeURIComponent(COUNTAPI_NS)}/${encodeURIComponent(key)}`;
+      return countapi(url);
+    }
+    async function createIfMissing(key){
+      // 预创建（幂等），避免首次访问无值
+      await countapi(`${COUNT_BASE}/create?namespace=${encodeURIComponent(COUNTAPI_NS)}&key=${encodeURIComponent(key)}&value=0`);
     }
 
-    async function initCounters() {
-      const k = todayKey();
-      if (!localStorage.getItem(k)) {
-        const res = await countapiHit(PV_KEY);
+    (async function initCounters(){
+      // 预创建两个计数器键
+      await createIfMissing(PV_KEY);
+      await createIfMissing(PLAY_KEY);
+
+      // 页面访问：按“每天一次/每设备”去重
+      const dayK = todayKey();
+      if (!localStorage.getItem(dayK)) {
+        const res = await hit(PV_KEY);
         if (res && typeof res.value === 'number') {
           pvSpan.textContent = res.value;
-          localStorage.setItem(k, '1');
+          localStorage.setItem(dayK, '1');
         }
       }
-      if (pvSpan.textContent === '—') {
-        const g = await countapiGet(PV_KEY);
-        if (g && typeof g.value === 'number') pvSpan.textContent = g.value;
-      }
+      // 刷新展示
+      const g1 = await get(PV_KEY);
+      if (g1 && typeof g1.value === 'number') pvSpan.textContent = g1.value;
 
+      // 播放次数：同一标签页只记一次
       let playedOnce = false;
       v.addEventListener('play', async () => {
         if (playedOnce) return;
         playedOnce = true;
-        const res = await countapiHit(PLAY_KEY);
+        const res = await hit(PLAY_KEY);
         if (res && typeof res.value === 'number') {
           playSpan.textContent = res.value;
         } else {
-          const g = await countapiGet(PLAY_KEY);
+          const g = await get(PLAY_KEY);
           if (g && typeof g.value === 'number') playSpan.textContent = g.value;
         }
       }, { once: true });
 
-      const g1 = await countapiGet(PV_KEY);
-      if (g1 && typeof g1.value === 'number') pvSpan.textContent = g1.value;
-      const g2 = await countapiGet(PLAY_KEY);
+      // 初始显示当前累计播放
+      const g2 = await get(PLAY_KEY);
       if (g2 && typeof g2.value === 'number') playSpan.textContent = g2.value;
-
-      statusEl.textContent = "就绪，可以播放 ✅";
-    }
-
-    v.addEventListener('loadedmetadata', () => {
-      statusEl.textContent = `视频时长：${Math.round(v.duration)} 秒`;
-    });
-    v.addEventListener('error', () => {
-      statusEl.innerHTML = `<span class="fail">视频加载失败，请检查 VIDEO_SRC 地址是否正确。</span>`;
-    });
-
-    initCounters();
+    })();
   </script>
 </body>
 </html>
